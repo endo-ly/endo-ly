@@ -33,8 +33,8 @@ Here are some ideas to get you started:
       </a>
     </td>
     <td valign="top">
-       <a href="https://github.com/endo-ava/xenharmonic-voyager">
-        <img src="https://github-readme-stats.vercel.app/api/pin/?username=endo-ava&repo=xenharmonic-voyager&theme=tokyonight" alt="Repo 2"/>
+       <a href="https://github.com/endo-ava/ego-graph">
+        <img src="https://github-readme-stats.vercel.app/api/pin/?username=endo-ava&repo=ego-graph&theme=tokyonight" alt="Repo 2"/>
       </a>
     </td>
   </tr>
