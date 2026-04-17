@@ -1,7 +1,6 @@
 name: Generate Profile Assets
 
 on:
-  # 毎日0時（UTC）
   schedule:
     - cron: "0 0 * * *"
 
@@ -9,7 +8,7 @@ on:
 
   push:
     branches:
-    - main
+      - main
 
 jobs:
   generate:
@@ -17,7 +16,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # コントリビューショングラフからスネークアニメーションを生成
+      - uses: actions/checkout@v4
+
+      - name: Create output directory
+        run: mkdir -p dist
+
+      # Contribution graph → snake animation
       - name: Generate github-contribution-grid-snake.svg
         uses: Platane/snk/svg-only@v3
         with:
@@ -28,30 +32,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 外部APIからSVGをダウンロードしてキャッシュ（失敗時は既存を保持）
-      - name: Download stats SVGs
-        run: |
-          download() {
-            local url="$1"
-            local file="$2"
-            local tmp
-            tmp=$(mktemp)
-            if curl --fail --silent --show-error -o "$tmp" "$url"; then
-              mv "$tmp" "dist/$file"
-              echo "✓ $file"
-            else
-              echo "⚠ Failed: $file"
-              rm -f "$tmp"
-            fi
-          }
+      # Self-hosted stats / languages / trophy generation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-          download "https://github-readme-stats.vercel.app/api?username=endo-ava&show_icons=true&theme=tokyonight&include_all_commits=true&count_private=true" "github-stats.svg"
-          download "https://github-readme-stats.vercel.app/api/top-langs/?username=endo-ava&layout=compact&langs_count=8&theme=tokyonight" "top-langs.svg"
-          download "https://github-profile-trophy.vercel.app/?username=endo-ava&theme=darkhub&no-frame=true&row=1&column=7" "trophy.svg"
-          download "https://github-readme-stats.vercel.app/api/pin/?username=endo-ava&repo=music-theory-app&theme=tokyonight" "pin-music-theory-app.svg"
-          download "https://github-readme-stats.vercel.app/api/pin/?username=endo-ava&repo=ego-graph&theme=tokyonight" "pin-ego-graph.svg"
+      - name: Generate stats SVGs
+        run: python scripts/generate_stats.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          OUTPUT_DIR: dist
 
-      # 生成したファイルをoutputブランチにpush
+      # Push all generated assets to the output branch
       - name: Push assets to output branch
         uses: crazy-max/ghaction-github-pages@v3.1.0
         with:

@@ -3,7 +3,6 @@
 - Based in **Tokyo, Japan**
 - Born in **2000**
 - Love **music** and **AI**
-- Building things across the stack — frontend, backend, cloud, and ML
 
 ---
 
