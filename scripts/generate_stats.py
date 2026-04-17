@@ -2,7 +2,23 @@
 """Generate GitHub profile stats SVGs directly from the GitHub API.
 
 No external services (Vercel, etc.) required — runs entirely in CI.
-Produces: github-stats.svg, top-langs.svg, trophy.svg
+
+Usage:
+  # 本番データ（GitHub API から取得、GITHUB_TOKEN が必要）
+  python3 scripts/generate_stats.py
+
+  # モックデータ（API 不要、見た目の確認用）
+  python3 scripts/generate_stats.py --mock
+
+Output:
+  dist/github-stats.svg  ... Commits / PRs / Issues / Stars / Repos
+  dist/top-langs.svg     ... 言語使用率バー（最大8言語）
+  dist/trophy.svg        ... トロフィーランク（S/A/B/C）× 6カテゴリ
+
+Notes:
+  - 生成物は dist/ に出力され、.gitignore で除外済み
+  - CI（.github/workflows/profile-assets.yml）が output ブランチに push する
+  - 環境変数: GITHUB_TOKEN, GITHUB_REPOSITORY_OWNER, OUTPUT_DIR
 """
 
 import json
@@ -282,12 +298,40 @@ def gen_trophy(trophies):
     return _wrap(W, H, body)
 
 
+# ── Mock data ───────────────────────────────────────────────────────────
+
+MOCK_STATS = {
+    "commits":   1_234,
+    "prs":       87,
+    "issues":    42,
+    "stars":     56,
+    "repos":     23,
+    "followers": 18,
+}
+
+MOCK_LANGS = [
+    {"name": "Python",     "pct": 35.2},
+    {"name": "TypeScript", "pct": 24.8},
+    {"name": "Go",         "pct": 15.3},
+    {"name": "Shell",      "pct": 10.1},
+    {"name": "HCL",        "pct":  7.6},
+    {"name": "Dockerfile", "pct":  4.2},
+    {"name": "HTML",       "pct":  2.8},
+]
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def main():
+    mock = "--mock" in sys.argv
     os.makedirs(OUT, exist_ok=True)
 
-    stats, langs = gather()
+    if mock:
+        print("Running with mock data...")
+        stats, langs = MOCK_STATS, MOCK_LANGS
+    else:
+        stats, langs = gather()
+
     trophies = calc_trophies(stats)
 
     svgs = {
