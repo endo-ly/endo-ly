@@ -215,7 +215,7 @@ def _title(txt, y=32):
 # ── SVG generators ──────────────────────────────────────────────────────
 
 def gen_stats(st):
-    W, H = 470, 200
+    W, H = 470, 315
     rows = [
         ("Total Commits", f'{st["commits"]:,}',  C["yellow"]),
         ("Total PRs",     f'{st["prs"]:,}',      C["green"]),
@@ -225,6 +225,7 @@ def gen_stats(st):
     ]
     body = _title("GitHub Stats")
     y = 60
+    ITEM_H = (H - 60) / len(rows)
     for label, val, clr in rows:
         body += (
             f"<circle cx='35' cy='{y}' r='4' fill='{clr}'/>"
@@ -234,7 +235,7 @@ def gen_stats(st):
             f"font-size='13' font-weight='bold' text-anchor='end' {FF}>"
             f"{val}</text>"
         )
-        y += 28
+        y += ITEM_H
     return _wrap(W, H, body)
 
 
@@ -242,8 +243,9 @@ def gen_langs(langs):
     if not langs:
         return None
     top = langs[:7]
-    W, BAR_H, ITEM_H, HDR = 470, 8, 35, 55
-    H = HDR + len(top) * ITEM_H + 15
+    W, H = 470, 315
+    BAR_H, HDR = 8, 55
+    ITEM_H = (H - HDR - 15) / len(top)
     body = _title("Most Used Languages")
     y, bw = HDR, W - 50
     for lg in top:
