@@ -310,33 +310,50 @@ def _title(txt, w=CARD_W, y=32):
     )
 
 
-def _row(y, label, value, color, right_x):
-    return (
-        f"<circle cx='35' cy='{y}' r='4' fill='{color}'/>"
-        f"<text x='48' y='{y+4}' fill='{C['text']}' "
-        f"font-size='13' {FF}>{label}</text>"
-        f"<text x='{right_x}' y='{y+4}' fill='{color}' "
-        f"font-size='13' font-weight='bold' text-anchor='end' {FF}>"
-        f"{value}</text>"
-    )
-
 
 # ── SVG generators ──────────────────────────────────────────────────────
 
 def gen_stats(st):
     W, H = CARD_W, CARD_H
-    rows = [
+    cells = [
         ("Total Commits", f'{st["commits"]:,}',  C["yellow"]),
         ("Total PRs",     f'{st["prs"]:,}',      C["green"]),
         ("Total Issues",  f'{st["issues"]:,}',   C["cyan"]),
         ("Earned Stars",  f'{st["stars"]:,}',    C["orange"]),
         ("Repositories",  f'{st["repos"]:,}',    C["purple"]),
+        ("Followers",     f'{st["followers"]:,}', C["red"]),
     ]
     body = _title("GitHub Stats", W)
-    y, item_h = 60, (H - 60) / len(rows)
-    for label, val, clr in rows:
-        body += _row(y, label, val, clr, W - 25)
-        y += item_h
+
+    COLS, ROWS = 2, 3
+    PAD, GAP = 20, 10
+    HDR = 55
+    cell_w = (W - PAD * 2 - GAP * (COLS - 1)) / COLS
+    cell_h = (H - HDR - PAD - GAP * (ROWS - 1)) / ROWS
+
+    for i, (label, val, clr) in enumerate(cells):
+        col, row = i % COLS, i // COLS
+        cx = PAD + col * (cell_w + GAP)
+        cy = HDR + row * (cell_h + GAP)
+
+        # cell background
+        body += (
+            f"<rect x='{cx}' y='{cy}' width='{cell_w}' height='{cell_h}' "
+            f"rx='6' fill='{C['surface']}'/>"
+        )
+        # value (large, centered)
+        vcx = cx + cell_w / 2
+        vcy = cy + cell_h / 2 - 4
+        body += (
+            f"<text x='{vcx}' y='{vcy}' fill='{clr}' "
+            f"font-size='24' font-weight='bold' text-anchor='middle' {FF}>"
+            f"{val}</text>"
+        )
+        # label (small, below value)
+        body += (
+            f"<text x='{vcx}' y='{vcy+20}' fill='{C['sub']}' "
+            f"font-size='10' text-anchor='middle' {FF}>{label}</text>"
+        )
     return _wrap(W, H, body)
 
 
@@ -367,23 +384,24 @@ def gen_langs(langs):
 
 
 def gen_streak(streak):
-    W, H = CARD_W, CARD_H
+    # 高さを Punch Card (650×255) と黄金比表示時に揃える
+    W, H = CARD_W, 309
     body = _title("Streak Stats", W)
     cur = streak["current"]
 
     # Hero: current streak
     body += (
-        f"<text x='{W/2}' y='130' fill='{C['green']}' "
-        f"font-size='56' font-weight='bold' text-anchor='middle' {FF}>"
+        f"<text x='{W/2}' y='125' fill='{C['green']}' "
+        f"font-size='52' font-weight='bold' text-anchor='middle' {FF}>"
         f"{cur}</text>"
-        f"<text x='{W/2}' y='158' fill='{C['sub']}' "
+        f"<text x='{W/2}' y='150' fill='{C['sub']}' "
         f"font-size='12' text-anchor='middle' {FF}>"
         f"day{'s' if cur != 1 else ''} current streak</text>"
     )
 
     # Bottom: longest + this year
     col_w = (W - 50) / 2
-    y = 215
+    y = 205
     lx, rx = 25 + col_w / 2, 25 + col_w + col_w / 2
     body += (
         f"<text x='{lx}' y='{y}' fill='{C['yellow']}' "
@@ -539,7 +557,54 @@ def main():
                 f.write(svg)
             print(f"  ok  {name}")
 
+    # Preview HTML
+    if "--preview" in sys.argv:
+        _gen_preview(svgs)
+
     print("Done.")
+
+
+def _gen_preview(svgs):
+    """Generate a Markdown preview that embeds the SVGs inline (base64)."""
+    import base64
+
+    def b64(name):
+        svg = svgs.get(name)
+        if not svg:
+            return None
+        encoded = base64.b64encode(svg.encode()).decode()
+        return f"data:image/svg+xml;base64,{encoded}"
+
+    stats_src = b64("github-stats.svg")
+    langs_src = b64("top-langs.svg")
+    punch_src = b64("punch-card.svg")
+    streak_src = b64("streak.svg")
+
+    md = "## 👋 About\n\n"
+    md += "- Based in **Tokyo, Japan**\n"
+    md += "- Born in **2000**\n"
+    md += "- Love **music** and **AI**\n\n"
+    md += "---\n\n"
+    md += "### GitHub Stats\n\n"
+    md += '<div align="center">\n'
+    if stats_src:
+        md += f'  <img width="49%" src="{stats_src}"/>\n'
+    if langs_src:
+        md += f'  <img width="49%" src="{langs_src}"/>\n'
+    md += "</div>\n\n"
+    md += "---\n\n"
+    md += "### Activity\n\n"
+    md += '<div align="center">\n'
+    if punch_src:
+        md += f'  <img width="62%" src="{punch_src}"/>\n'
+    if streak_src:
+        md += f'  <img width="37%" src="{streak_src}"/>\n'
+    md += "</div>\n"
+
+    path = os.path.join(OUT, "preview.md")
+    with open(path, "w") as f:
+        f.write(md)
+    print(f"  ok  preview.md -> {path}")
 
 
 if __name__ == "__main__":
