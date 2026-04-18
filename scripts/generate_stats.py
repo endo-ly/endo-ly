@@ -231,6 +231,9 @@ def gather():
 
     print("Fetching languages...")
     lang_bytes = fetch_languages(repos)
+    # Debug: show full language ranking
+    for i, (n, s) in enumerate(sorted(lang_bytes.items(), key=lambda x: -x[1]), 1):
+        print(f"    {i:2d}. {n:24s} {s:>12,} bytes")
 
     total = sum(lang_bytes.values()) or 1
     langs = [
