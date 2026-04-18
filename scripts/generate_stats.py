@@ -24,6 +24,7 @@ Notes:
 """
 
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -36,18 +37,21 @@ TOKEN = os.environ.get("GITHUB_TOKEN", "")
 OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "endo-ava")
 OUT   = os.environ.get("OUTPUT_DIR", "dist")
 API   = "https://api.github.com"
-TZ_OFFSET = 9  # JST (UTC+9)
+TZ_OFFSET = 9
 
-# Stats / Langs / Streak 共通カードサイズ
+# Card dimensions
 CARD_W, CARD_H = 470, 315
 
-# Tokyonight colour palette
+ACTIVITY_H = 260
+PUNCH_W = int(ACTIVITY_H * 3 * 0.75)
+STREAK_W = int(ACTIVITY_H * 1 * 0.75)
+
 C = {
     "bg":      "#1a1b27",
     "surface": "#24283b",
     "border":  "#414868",
     "text":    "#c0caf5",
-    "sub":     "#565f89",
+    "sub":     "#7982a9",
     "blue":    "#7aa2f7",
     "green":   "#9ece6a",
     "red":     "#f7768e",
@@ -56,6 +60,19 @@ C = {
     "purple":  "#bb9af7",
     "orange":  "#ff9e64",
 }
+
+# Font sizes (typography scale)
+FS = {
+    "title":   16,
+    "hero":    48,
+    "large":   26,
+    "medium":  18,
+    "body":    13,
+    "small":   11,
+    "badge":   14,
+}
+
+FF = "font-family='Segoe UI,Helvetica,Arial,sans-serif'"
 
 # Language → colour (GitHub official palette)
 LANG_CLR = {
@@ -95,9 +112,6 @@ LANG_CLR = {
 
 
 # ── API helpers ─────────────────────────────────────────────────────────
-
-FF = "font-family='Segoe UI,Helvetica,Arial,sans-serif'"
-
 
 def _get(path, extra_headers=None):
     hdrs = {
@@ -231,7 +245,6 @@ def gather():
 
     print("Fetching languages...")
     lang_bytes = fetch_languages(repos)
-    # Debug: show full language ranking
     for i, (n, s) in enumerate(sorted(lang_bytes.items(), key=lambda x: -x[1]), 1):
         print(f"    {i:2d}. {n:24s} {s:>12,} bytes")
 
@@ -317,9 +330,9 @@ def calc_trophies(st):
     return out
 
 
-# ── SVG helpers ─────────────────────────────────────────────────────────
+# ── SVG builder primitives ──────────────────────────────────────────────
 
-def _wrap(w, h, body):
+def _svg_card(w, h, body):
     return (
         f"<svg xmlns='http://www.w3.org/2000/svg' "
         f"width='{w}' height='{h}' viewBox='0 0 {w} {h}'>"
@@ -330,20 +343,57 @@ def _wrap(w, h, body):
     )
 
 
-def _title(txt, w=CARD_W, y=32):
+def _svg_title(txt, w, y=34):
     return (
-        f"<text x='25' y='{y}' fill='{C['text']}' font-size='15' "
+        f"<text x='25' y='{y}' fill='{C['text']}' font-size='{FS['title']}' "
         f"font-weight='bold' {FF}>{txt}</text>"
-        f"<line x1='25' y1='{y+10}' x2='{w-25}' y2='{y+10}' "
+        f"<line x1='25' y1='{y + 12}' x2='{w - 25}' y2='{y + 12}' "
         f"stroke='{C['border']}' stroke-width='0.5'/>"
     )
 
+
+def _svg_rect(x, y, w, h, fill, rx=6, stroke=None):
+    s = (
+        f"<rect x='{x:.1f}' y='{y:.1f}' width='{w:.1f}' height='{h:.1f}' "
+        f"rx='{rx}' fill='{fill}'/>"
+    )
+    if stroke:
+        s += (
+            f"<rect x='{x:.1f}' y='{y:.1f}' width='{w:.1f}' height='{h:.1f}' "
+            f"rx='{rx}' fill='none' stroke='{stroke}' stroke-width='0.5'/>"
+        )
+    return s
+
+
+def _svg_text(x, y, text, fill, size, anchor="start", bold=False):
+    weight = " font-weight='bold'" if bold else ""
+    return (
+        f"<text x='{x:.1f}' y='{y:.1f}' fill='{fill}' "
+        f"font-size='{size}'{weight} text-anchor='{anchor}' {FF}>"
+        f"{text}</text>"
+    )
+
+
+def _svg_circle(cx, cy, r, fill, opacity=1.0, stroke=None, stroke_w=1.0):
+    s = f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='{r:.1f}' fill='{fill}'"
+    if opacity < 1.0:
+        s += f" opacity='{opacity:.2f}'"
+    s += "/>"
+    if stroke:
+        s += (
+            f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='{r:.1f}' "
+            f"fill='none' stroke='{stroke}' stroke-width='{stroke_w:.1f}'/>"
+        )
+    return s
 
 
 # ── SVG generators ──────────────────────────────────────────────────────
 
 def gen_stats(st):
+    """2×3 grid card: Total Commits / PRs / Issues / Stars / Repos / Followers."""
     W, H = CARD_W, CARD_H
+    HDR = 58
+
     cells = [
         ("Total Commits", f'{st["commits"]:,}',  C["yellow"]),
         ("Total PRs",     f'{st["prs"]:,}',      C["green"]),
@@ -352,11 +402,11 @@ def gen_stats(st):
         ("Repositories",  f'{st["repos"]:,}',    C["purple"]),
         ("Followers",     f'{st["followers"]:,}', C["red"]),
     ]
-    body = _title("GitHub Stats", W)
+
+    body = _svg_title("GitHub Stats", W)
 
     COLS, ROWS = 2, 3
     PAD, GAP = 20, 10
-    HDR = 55
     cell_w = (W - PAD * 2 - GAP * (COLS - 1)) / COLS
     cell_h = (H - HDR - PAD - GAP * (ROWS - 1)) / ROWS
 
@@ -365,131 +415,105 @@ def gen_stats(st):
         cx = PAD + col * (cell_w + GAP)
         cy = HDR + row * (cell_h + GAP)
 
-        # cell background
-        body += (
-            f"<rect x='{cx}' y='{cy}' width='{cell_w}' height='{cell_h}' "
-            f"rx='6' fill='{C['surface']}'/>"
-        )
-        # value (large, centered)
+        body += _svg_rect(cx, cy, cell_w, cell_h, C["surface"], stroke=C["border"])
         vcx = cx + cell_w / 2
         vcy = cy + cell_h / 2 - 4
-        body += (
-            f"<text x='{vcx}' y='{vcy}' fill='{clr}' "
-            f"font-size='24' font-weight='bold' text-anchor='middle' {FF}>"
-            f"{val}</text>"
-        )
-        # label (small, below value)
-        body += (
-            f"<text x='{vcx}' y='{vcy+20}' fill='{C['sub']}' "
-            f"font-size='10' text-anchor='middle' {FF}>{label}</text>"
-        )
-    return _wrap(W, H, body)
+        body += _svg_text(vcx, vcy, val, clr, FS["large"], anchor="middle", bold=True)
+        body += _svg_text(vcx, vcy + 22, label, C["sub"], FS["body"], anchor="middle")
+
+    return _svg_card(W, H, body)
 
 
 def gen_langs(langs):
+    """Horizontal bar chart: top 7 languages with percentage."""
     if not langs:
         return None
     top = langs[:7]
     W, H = CARD_W, CARD_H
-    BAR_H, HDR = 8, 55
+    HDR = 58
+    BAR_H = 10
     item_h = (H - HDR - 15) / len(top)
-    body = _title("Most Used Languages", W)
-    y, bw = HDR, W - 50
-    for lg in top:
-        clr  = LANG_CLR.get(lg["name"], C["blue"])
-        fill = bw * lg["pct"] / 100
-        body += (
-            f"<text x='25' y='{y}' fill='{C['text']}' "
-            f"font-size='12' {FF}>{lg['name']}</text>"
-            f"<text x='{W-25}' y='{y}' fill='{clr}' "
-            f"font-size='12' text-anchor='end' {FF}>{lg['pct']}%</text>"
-            f"<rect x='25' y='{y+6}' width='{bw}' height='{BAR_H}' "
-            f"rx='4' fill='{C['surface']}'/>"
-            f"<rect x='25' y='{y+6}' width='{fill:.1f}' height='{BAR_H}' "
-            f"rx='4' fill='{clr}'/>"
-        )
-        y += item_h
-    return _wrap(W, H, body)
+    body = _svg_title("Most Used Languages", W)
+    bw = W - 50
+
+    for i, lg in enumerate(top):
+        clr = LANG_CLR.get(lg["name"], C["blue"])
+        y = HDR + i * item_h
+        fill_w = bw * lg["pct"] / 100
+
+        body += _svg_text(25, y, lg["name"], C["text"], FS["body"])
+        body += _svg_text(W - 25, y, f"{lg['pct']}%", clr, FS["body"], anchor="end")
+        body += _svg_rect(25, y + 8, bw, BAR_H, C["surface"], rx=4)
+        body += _svg_rect(25, y + 8, fill_w, BAR_H, clr, rx=4)
+
+    return _svg_card(W, H, body)
 
 
 def gen_streak(streak):
-    # 高さを Punch Card (650×255) と黄金比表示時に揃える
-    W, H = CARD_W, 309
-    body = _title("Streak Stats", W)
+    """Streak card: current streak hero + longest / this-year below."""
+    W, H = STREAK_W, ACTIVITY_H
+    body = _svg_title("Streak Stats", W)
+
     cur = streak["current"]
+    cx = W / 2
 
     # Hero: current streak
-    body += (
-        f"<text x='{W/2}' y='125' fill='{C['green']}' "
-        f"font-size='52' font-weight='bold' text-anchor='middle' {FF}>"
-        f"{cur}</text>"
-        f"<text x='{W/2}' y='150' fill='{C['sub']}' "
-        f"font-size='12' text-anchor='middle' {FF}>"
-        f"day{'s' if cur != 1 else ''} current streak</text>"
+    body += _svg_text(cx, 115, str(cur), C["green"], FS["hero"], anchor="middle", bold=True)
+    body += _svg_text(
+        cx, 145,
+        f"day{'s' if cur != 1 else ''} current streak",
+        C["sub"], FS["body"], anchor="middle",
     )
 
-    # Bottom: longest + this year
-    col_w = (W - 50) / 2
-    y = 205
-    lx, rx = 25 + col_w / 2, 25 + col_w + col_w / 2
-    body += (
-        f"<text x='{lx}' y='{y}' fill='{C['yellow']}' "
-        f"font-size='30' font-weight='bold' text-anchor='middle' {FF}>"
-        f"{streak['longest']}</text>"
-        f"<text x='{lx}' y='{y+20}' fill='{C['sub']}' "
-        f"font-size='11' text-anchor='middle' {FF}>Longest Streak</text>"
-        f"<text x='{rx}' y='{y}' fill='{C['cyan']}' "
-        f"font-size='30' font-weight='bold' text-anchor='middle' {FF}>"
-        f"{streak['total']:,}</text>"
-        f"<text x='{rx}' y='{y+20}' fill='{C['sub']}' "
-        f"font-size='11' text-anchor='middle' {FF}>This Year</text>"
-    )
-    return _wrap(W, H, body)
+    ly = 175
+    body += _svg_text(cx, ly, str(streak["longest"]), C["yellow"], FS["medium"], anchor="middle", bold=True)
+    body += _svg_text(cx, ly + 18, "Longest Streak", C["sub"], FS["body"], anchor="middle")
+
+    body += _svg_text(cx, ly + 45, f"{streak['total']:,}", C["cyan"], FS["medium"], anchor="middle", bold=True)
+    body += _svg_text(cx, ly + 63, "This Year", C["sub"], FS["body"], anchor="middle")
+
+    return _svg_card(W, H, body)
 
 
 def gen_punch_card(matrix):
-    CELL = 24
-    LM, TM = 50, 55
-    W = LM + 24 * CELL + 20
-    H = TM + 7 * CELL + 25
+    """Bubble chart: weekday × hour, sized by commit frequency."""
+    LM, TM = 48, 58
+    GAP_R, GAP_B = 20, 20
+
+    cell_w = (PUNCH_W - LM - GAP_R) / 24
+    cell_h = (ACTIVITY_H - TM - GAP_B) / 7
     max_val = max(max(row) for row in matrix) or 1
 
-    body = _title("Punch Card", W)
+    body = _svg_title("Punch Card", PUNCH_W)
 
     for h in range(0, 24, 3):
-        x = LM + h * CELL + CELL // 2
-        body += (
-            f"<text x='{x}' y='{TM-8}' fill='{C['sub']}' "
-            f"font-size='9' text-anchor='middle' {FF}>{h}</text>"
-        )
+        x = LM + h * cell_w + cell_w / 2
+        body += _svg_text(x, TM - 10, str(h), C["sub"], FS["small"], anchor="middle")
 
     for d, day in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
-        y = TM + d * CELL + CELL // 2
-        body += (
-            f"<text x='{LM-8}' y='{y+4}' fill='{C['sub']}' "
-            f"font-size='10' text-anchor='end' {FF}>{day}</text>"
-        )
+        y = TM + d * cell_h + cell_h / 2
+        body += _svg_text(LM - 8, y + 4, day, C["sub"], FS["small"], anchor="end")
 
     for d in range(7):
         for h in range(24):
-            cx = LM + h * CELL + CELL // 2
-            cy = TM + d * CELL + CELL // 2
+            cx = LM + h * cell_w + cell_w / 2
+            cy = TM + d * cell_h + cell_h / 2
             val = matrix[d][h]
             if val == 0:
-                body += f"<circle cx='{cx}' cy='{cy}' r='1.5' fill='{C['border']}'/>"
+                body += _svg_circle(cx, cy, 1.5, C["border"])
             else:
                 ratio = val / max_val
-                r = 3 + ratio * 8
+                max_r = min(cell_w, cell_h) / 2 * 0.7
+                r = 2 + ratio * max_r
                 opacity = 0.4 + ratio * 0.6
                 clr = C["green"] if ratio > 0.7 else C["blue"] if ratio > 0.4 else C["cyan"]
-                body += (
-                    f"<circle cx='{cx}' cy='{cy}' r='{r:.1f}' "
-                    f"fill='{clr}' opacity='{opacity:.2f}'/>"
-                )
-    return _wrap(W, H, body)
+                body += _svg_circle(cx, cy, r, clr, opacity=opacity)
+
+    return _svg_card(PUNCH_W, ACTIVITY_H, body)
 
 
 def gen_trophy(trophies):
+    """Horizontal trophy row: S/A/B/C rank × categories."""
     if not trophies:
         return None
     CW, CH, PAD, GAP = 120, 100, 15, 12
@@ -497,27 +521,20 @@ def gen_trophy(trophies):
     H = CH + PAD * 2
     RC = {"S": C["yellow"], "A": C["green"], "B": C["blue"], "C": C["sub"]}
 
-    body, x = "", PAD
+    body = ""
+    x = PAD
     for label, rank in trophies:
         rc = RC.get(rank, C["sub"])
         cx = x + CW / 2
-        body += (
-            f"<rect x='{x}' y='{PAD}' width='{CW}' height='{CH}' "
-            f"rx='6' fill='{C['surface']}'/>"
-            f"<rect x='{x}' y='{PAD}' width='{CW}' height='{CH}' "
-            f"rx='6' fill='none' stroke='{C['border']}' stroke-width='0.5'/>"
-            f"<circle cx='{cx}' cy='{PAD+30}' r='18' "
-            f"fill='{rc}' opacity='0.15'/>"
-            f"<circle cx='{cx}' cy='{PAD+30}' r='18' "
-            f"fill='none' stroke='{rc}' stroke-width='1.5'/>"
-            f"<text x='{cx}' y='{PAD+36}' fill='{rc}' "
-            f"font-size='18' font-weight='bold' text-anchor='middle' {FF}>"
-            f"{rank}</text>"
-            f"<text x='{cx}' y='{PAD+70}' fill='{C['sub']}' "
-            f"font-size='9' text-anchor='middle' {FF}>{label}</text>"
-        )
+        badge_y = PAD + 30
+
+        body += _svg_rect(x, PAD, CW, CH, C["surface"], stroke=C["border"])
+        body += _svg_circle(cx, badge_y, 18, rc, opacity=0.15, stroke=rc, stroke_w=1.5)
+        body += _svg_text(cx, badge_y + 6, rank, rc, FS["badge"], anchor="middle", bold=True)
+        body += _svg_text(cx, PAD + 72, label, C["sub"], FS["body"], anchor="middle")
         x += CW + GAP
-    return _wrap(W, H, body)
+
+    return _svg_card(W, H, body)
 
 
 # ── Mock data ───────────────────────────────────────────────────────────
@@ -586,7 +603,6 @@ def main():
                 f.write(svg)
             print(f"  ok  {name}")
 
-    # Preview HTML
     if "--preview" in sys.argv:
         _gen_preview(svgs)
 
@@ -594,7 +610,6 @@ def main():
 
 
 def _gen_preview(svgs):
-    """Generate a Markdown preview that embeds the SVGs inline (base64)."""
     import base64
 
     def b64(name):
@@ -625,9 +640,9 @@ def _gen_preview(svgs):
     md += "### Activity\n\n"
     md += '<div align="center">\n'
     if punch_src:
-        md += f'  <img width="62%" src="{punch_src}"/>\n'
+        md += f'  <img width="74%" src="{punch_src}"/>\n'
     if streak_src:
-        md += f'  <img width="37%" src="{streak_src}"/>\n'
+        md += f'  <img width="24%" src="{streak_src}"/>\n'
     md += "</div>\n"
 
     path = os.path.join(OUT, "preview.md")
