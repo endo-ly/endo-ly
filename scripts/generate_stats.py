@@ -59,21 +59,38 @@ C = {
 
 # Language → colour (GitHub official palette)
 LANG_CLR = {
-    "Python":           "#3572A5", "TypeScript":       "#3178C6",
-    "JavaScript":       "#F7DF1E", "Go":               "#00ADD8",
-    "Rust":             "#DEA584", "Java":             "#B07219",
-    "HTML":             "#E34F26", "CSS":              "#563D7C",
-    "Shell":            "#89E051", "Dart":             "#00B4AB",
-    "Kotlin":           "#A97BFF", "Swift":            "#F05138",
-    "C++":              "#F34B7D", "C":                "#555555",
-    "Ruby":             "#CC342D", "PHP":              "#4F5D95",
-    "Jupyter Notebook": "#DA5B0B", "Vue":              "#41B883",
-    "Svelte":           "#FF3E00", "Lua":              "#000080",
-    "Dockerfile":       "#384D54", "SCSS":             "#C6538C",
-    "HCL":              "#844FBA", "Nix":              "#7E7EFF",
-    "Makefile":         "#427819", "Perl":             "#0298C3",
-    "R":                "#198CE7", "Scala":            "#DC322F",
-    "Haskell":          "#5E5086", "Elixir":           "#6E4A7E",
+    "1C Enterprise":    "#814CCC", "ABAP":             "#E8274B",
+    "ActionScript":     "#882B0F", "Ada":              "#02F88C",
+    "Agda":             "#315665", "Assembly":         "#6E4C13",
+    "AutoHotkey":       "#6594B9", "Batchfile":        "#C1F12E",
+    "C":                "#555555", "C#":               "#178600",
+    "C++":              "#F34B7D", "Clojure":          "#DB5855",
+    "CMake":            "#DA3434", "CoffeeScript":     "#244776",
+    "Crystal":          "#000100", "CSS":              "#563D7C",
+    "D":                "#BA595E", "Dart":             "#00B4AB",
+    "Dockerfile":       "#384D54", "Elixir":           "#6E4A7E",
+    "Elm":              "#60B5CC", "Emacs Lisp":       "#C065DB",
+    "Erlang":           "#B83998", "F#":               "#B845FC",
+    "Fortran":          "#4D41B1", "GLSL":             "#5586A4",
+    "Go":               "#00ADD8", "Groovy":           "#4298B8",
+    "HCL":              "#844FBA", "Haskell":          "#5E5086",
+    "HTML":             "#E34F26", "Java":             "#B07219",
+    "JavaScript":       "#F7DF1E", "Julia":            "#9558B2",
+    "Jupyter Notebook": "#DA5B0B", "Kotlin":           "#A97BFF",
+    "Less":             "#1D365D", "Lua":              "#000080",
+    "Makefile":         "#427819", "Markdown":         "#083FA1",
+    "Nix":              "#7E7EFF", "Objective-C":      "#438EFF",
+    "OCaml":            "#3BE133", "Perl":             "#0298C3",
+    "PHP":              "#4F5D95", "PowerShell":       "#012456",
+    "Python":           "#3572A5", "R":                "#198CE7",
+    "Ruby":             "#CC342D", "Rust":             "#DEA584",
+    "Sass":             "#A53B70", "Scala":            "#DC322F",
+    "SCSS":             "#C6538C", "Shell":            "#89E051",
+    "Swift":            "#F05138", "Svelte":           "#FF3E00",
+    "TSQL":             "#E38C00", "TypeScript":       "#3178C6",
+    "V":                "#5D6D48", "Vim Script":       "#199F4B",
+    "Vue":              "#41B883", "WebAssembly":      "#04133B",
+    "Zig":              "#EC915C",
 }
 
 
@@ -146,14 +163,25 @@ def fetch_languages(repos):
     return totals
 
 
-def fetch_events():
-    events = []
-    for page in range(1, 4):
-        data = _get(f"/users/{OWNER}/events?per_page=100&page={page}")
-        if not data:
-            break
-        events.extend(data)
-    return events
+def fetch_commit_timestamps(repos):
+    """Fetch commit timestamps from repos for punch card."""
+    timestamps = []
+    for repo in repos:
+        if repo.get("fork"):
+            continue
+        commits = _get(f'/repos/{OWNER}/{repo["name"]}/commits?per_page=100')
+        if not commits:
+            continue
+        for c in commits:
+            if not isinstance(c, dict):
+                continue
+            author = c.get("author")
+            if author and author.get("login") == OWNER:
+                ts = c.get("commit", {}).get("author", {}).get("date", "")
+                if ts:
+                    timestamps.append(ts)
+    print(f"  {len(timestamps)} commits found")
+    return timestamps
 
 
 def fetch_contribution_calendar():
@@ -225,15 +253,13 @@ def gather():
     return stats, langs
 
 
-def build_punch_card(events):
+def build_punch_card(timestamps):
+    """Build a 7×24 matrix from commit timestamps."""
     matrix = [[0] * 24 for _ in range(7)]
-    for ev in events:
-        if ev.get("type") != "PushEvent":
-            continue
-        ts = ev.get("created_at", "")
+    for ts in timestamps:
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) + timedelta(hours=TZ_OFFSET)
-            matrix[dt.weekday()][dt.hour] += len(ev.get("payload", {}).get("commits", []))
+            matrix[dt.weekday()][dt.hour] += 1
         except Exception:
             pass
     return matrix
@@ -537,8 +563,8 @@ def main():
         punch, streak = MOCK_PUNCH, MOCK_STREAK
     else:
         stats, langs = gather()
-        print("Fetching events...")
-        punch = build_punch_card(fetch_events())
+        print("Fetching commit timestamps...")
+        punch = build_punch_card(fetch_commit_timestamps(fetch_repos()))
         print("Fetching contribution calendar...")
         streak = calc_streak(fetch_contribution_calendar())
 
