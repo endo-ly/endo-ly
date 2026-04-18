@@ -9,14 +9,15 @@
 ### GitHub Stats
 
 <div align="center">
-  <img width="49%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/github-stats.svg"/>
-  <img width="49%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/top-langs.svg"/>
+  <img width="32%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/github-stats.svg"/>
+  <img width="32%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/top-langs.svg"/>
+  <img width="32%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/streak.svg"/>
 </div>
 
 ---
 
-### Contributions
+### Activity
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/github-contribution-grid-snake.svg" alt="Snake animation" />
+  <img width="100%" src="https://raw.githubusercontent.com/endo-ava/endo-ava/output/punch-card.svg" alt="Punch Card" />
 </div>

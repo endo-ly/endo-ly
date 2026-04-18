@@ -12,7 +12,9 @@ Usage:
 
 Output:
   dist/github-stats.svg  ... Commits / PRs / Issues / Stars / Repos
-  dist/top-langs.svg     ... 言語使用率バー（最大8言語）
+  dist/top-langs.svg     ... 言語使用率バー（最大7言語）
+  dist/streak.svg        ... Current / Longest Streak + This Year
+  dist/punch-card.svg    ... 曜日×時間帯のバブルチャート
   dist/trophy.svg        ... トロフィーランク（S/A/B/C）× 6カテゴリ
 
 Notes:
@@ -24,14 +26,20 @@ Notes:
 import json
 import os
 import sys
-import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
+
 
 # ── Configuration ───────────────────────────────────────────────────────
+
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "endo-ava")
 OUT   = os.environ.get("OUTPUT_DIR", "dist")
 API   = "https://api.github.com"
+TZ_OFFSET = 9  # JST (UTC+9)
+
+# Stats / Langs / Streak 共通カードサイズ
+CARD_W, CARD_H = 470, 315
 
 # Tokyonight colour palette
 C = {
@@ -71,6 +79,9 @@ LANG_CLR = {
 
 # ── API helpers ─────────────────────────────────────────────────────────
 
+FF = "font-family='Segoe UI,Helvetica,Arial,sans-serif'"
+
+
 def _get(path, extra_headers=None):
     hdrs = {
         "Authorization": f"token {TOKEN}",
@@ -86,6 +97,26 @@ def _get(path, extra_headers=None):
         print(f"  warn: {path} -> {exc}", file=sys.stderr)
         return None
 
+
+def _graphql(query):
+    data = json.dumps({"query": query}).encode()
+    req = urllib.request.Request(
+        f"{API}/graphql", data=data,
+        headers={
+            "Authorization": f"bearer {TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except Exception as exc:
+        print(f"  warn: graphql -> {exc}", file=sys.stderr)
+        return None
+
+
+# ── Data fetchers ───────────────────────────────────────────────────────
 
 def fetch_repos():
     repos, page = [], 1
@@ -115,6 +146,38 @@ def fetch_languages(repos):
     return totals
 
 
+def fetch_events():
+    events = []
+    for page in range(1, 4):
+        data = _get(f"/users/{OWNER}/events?per_page=100&page={page}")
+        if not data:
+            break
+        events.extend(data)
+    return events
+
+
+def fetch_contribution_calendar():
+    year = datetime.now().year
+    query = (
+        '{ user(login: "%s") { contributionsCollection('
+        'from: "%d-01-01T00:00:00Z", to: "%d-12-31T23:59:59Z") {'
+        " contributionCalendar { totalContributions weeks { contributionDays {"
+        ' contributionCount date } } } } } }' % (OWNER, year, year)
+    )
+    result = _graphql(query)
+    if not result:
+        return None
+    try:
+        cal = result["data"]["user"]["contributionsCollection"]["contributionCalendar"]
+        days = []
+        for week in cal["weeks"]:
+            for day in week["contributionDays"]:
+                days.append({"date": day["date"], "count": day["contributionCount"]})
+        return {"total": cal["totalContributions"], "days": days}
+    except (KeyError, TypeError):
+        return None
+
+
 def _search_count(q):
     data = _get(f"/search/issues?q={q}&per_page=1")
     return data.get("total_count", 0) if data else 0
@@ -128,7 +191,7 @@ def _commit_count():
     return data.get("total_count", 0) if data else 0
 
 
-# ── Data gathering ──────────────────────────────────────────────────────
+# ── Data processing ─────────────────────────────────────────────────────
 
 def gather():
     print("Fetching profile...")
@@ -146,7 +209,6 @@ def gather():
         {"name": n, "pct": round(s / total * 100, 1)}
         for n, s in sorted(lang_bytes.items(), key=lambda x: -x[1])[:8]
     ]
-    # normalise to 100 %
     s = sum(l["pct"] for l in langs) or 1
     for l in langs:
         l["pct"] = round(l["pct"] / s * 100, 1)
@@ -163,7 +225,46 @@ def gather():
     return stats, langs
 
 
-# ── Trophy calculator ───────────────────────────────────────────────────
+def build_punch_card(events):
+    matrix = [[0] * 24 for _ in range(7)]
+    for ev in events:
+        if ev.get("type") != "PushEvent":
+            continue
+        ts = ev.get("created_at", "")
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) + timedelta(hours=TZ_OFFSET)
+            matrix[dt.weekday()][dt.hour] += len(ev.get("payload", {}).get("commits", []))
+        except Exception:
+            pass
+    return matrix
+
+
+def calc_streak(contrib_data):
+    if not contrib_data or not contrib_data["days"]:
+        return {"current": 0, "longest": 0, "total": 0}
+
+    days = contrib_data["days"]
+    total = contrib_data["total"]
+
+    longest = streak = 0
+    for day in days:
+        if day["count"] > 0:
+            streak += 1
+            longest = max(longest, streak)
+        else:
+            streak = 0
+
+    current = 0
+    for day in reversed(days):
+        if day["count"] > 0:
+            current += 1
+        elif current == 0:
+            continue
+        else:
+            break
+
+    return {"current": current, "longest": longest, "total": total}
+
 
 def calc_trophies(st):
     def tier(val, th):
@@ -189,9 +290,6 @@ def calc_trophies(st):
 
 # ── SVG helpers ─────────────────────────────────────────────────────────
 
-FF = "font-family='Segoe UI,Helvetica,Arial,sans-serif'"
-
-
 def _wrap(w, h, body):
     return (
         f"<svg xmlns='http://www.w3.org/2000/svg' "
@@ -203,19 +301,30 @@ def _wrap(w, h, body):
     )
 
 
-def _title(txt, y=32):
+def _title(txt, w=CARD_W, y=32):
     return (
         f"<text x='25' y='{y}' fill='{C['text']}' font-size='15' "
         f"font-weight='bold' {FF}>{txt}</text>"
-        f"<line x1='25' y1='{y+10}' x2='445' y2='{y+10}' "
+        f"<line x1='25' y1='{y+10}' x2='{w-25}' y2='{y+10}' "
         f"stroke='{C['border']}' stroke-width='0.5'/>"
+    )
+
+
+def _row(y, label, value, color, right_x):
+    return (
+        f"<circle cx='35' cy='{y}' r='4' fill='{color}'/>"
+        f"<text x='48' y='{y+4}' fill='{C['text']}' "
+        f"font-size='13' {FF}>{label}</text>"
+        f"<text x='{right_x}' y='{y+4}' fill='{color}' "
+        f"font-size='13' font-weight='bold' text-anchor='end' {FF}>"
+        f"{value}</text>"
     )
 
 
 # ── SVG generators ──────────────────────────────────────────────────────
 
 def gen_stats(st):
-    W, H = 470, 315
+    W, H = CARD_W, CARD_H
     rows = [
         ("Total Commits", f'{st["commits"]:,}',  C["yellow"]),
         ("Total PRs",     f'{st["prs"]:,}',      C["green"]),
@@ -223,19 +332,11 @@ def gen_stats(st):
         ("Earned Stars",  f'{st["stars"]:,}',    C["orange"]),
         ("Repositories",  f'{st["repos"]:,}',    C["purple"]),
     ]
-    body = _title("GitHub Stats")
-    y = 60
-    ITEM_H = (H - 60) / len(rows)
+    body = _title("GitHub Stats", W)
+    y, item_h = 60, (H - 60) / len(rows)
     for label, val, clr in rows:
-        body += (
-            f"<circle cx='35' cy='{y}' r='4' fill='{clr}'/>"
-            f"<text x='48' y='{y+4}' fill='{C['text']}' "
-            f"font-size='13' {FF}>{label}</text>"
-            f"<text x='445' y='{y+4}' fill='{clr}' "
-            f"font-size='13' font-weight='bold' text-anchor='end' {FF}>"
-            f"{val}</text>"
-        )
-        y += ITEM_H
+        body += _row(y, label, val, clr, W - 25)
+        y += item_h
     return _wrap(W, H, body)
 
 
@@ -243,10 +344,10 @@ def gen_langs(langs):
     if not langs:
         return None
     top = langs[:7]
-    W, H = 470, 315
+    W, H = CARD_W, CARD_H
     BAR_H, HDR = 8, 55
-    ITEM_H = (H - HDR - 15) / len(top)
-    body = _title("Most Used Languages")
+    item_h = (H - HDR - 15) / len(top)
+    body = _title("Most Used Languages", W)
     y, bw = HDR, W - 50
     for lg in top:
         clr  = LANG_CLR.get(lg["name"], C["blue"])
@@ -254,14 +355,90 @@ def gen_langs(langs):
         body += (
             f"<text x='25' y='{y}' fill='{C['text']}' "
             f"font-size='12' {FF}>{lg['name']}</text>"
-            f"<text x='445' y='{y}' fill='{clr}' "
+            f"<text x='{W-25}' y='{y}' fill='{clr}' "
             f"font-size='12' text-anchor='end' {FF}>{lg['pct']}%</text>"
             f"<rect x='25' y='{y+6}' width='{bw}' height='{BAR_H}' "
             f"rx='4' fill='{C['surface']}'/>"
             f"<rect x='25' y='{y+6}' width='{fill:.1f}' height='{BAR_H}' "
             f"rx='4' fill='{clr}'/>"
         )
-        y += ITEM_H
+        y += item_h
+    return _wrap(W, H, body)
+
+
+def gen_streak(streak):
+    W, H = CARD_W, CARD_H
+    body = _title("Streak Stats", W)
+    cur = streak["current"]
+
+    # Hero: current streak
+    body += (
+        f"<text x='{W/2}' y='130' fill='{C['green']}' "
+        f"font-size='56' font-weight='bold' text-anchor='middle' {FF}>"
+        f"{cur}</text>"
+        f"<text x='{W/2}' y='158' fill='{C['sub']}' "
+        f"font-size='12' text-anchor='middle' {FF}>"
+        f"day{'s' if cur != 1 else ''} current streak</text>"
+    )
+
+    # Bottom: longest + this year
+    col_w = (W - 50) / 2
+    y = 215
+    lx, rx = 25 + col_w / 2, 25 + col_w + col_w / 2
+    body += (
+        f"<text x='{lx}' y='{y}' fill='{C['yellow']}' "
+        f"font-size='30' font-weight='bold' text-anchor='middle' {FF}>"
+        f"{streak['longest']}</text>"
+        f"<text x='{lx}' y='{y+20}' fill='{C['sub']}' "
+        f"font-size='11' text-anchor='middle' {FF}>Longest Streak</text>"
+        f"<text x='{rx}' y='{y}' fill='{C['cyan']}' "
+        f"font-size='30' font-weight='bold' text-anchor='middle' {FF}>"
+        f"{streak['total']:,}</text>"
+        f"<text x='{rx}' y='{y+20}' fill='{C['sub']}' "
+        f"font-size='11' text-anchor='middle' {FF}>This Year</text>"
+    )
+    return _wrap(W, H, body)
+
+
+def gen_punch_card(matrix):
+    CELL = 24
+    LM, TM = 50, 55
+    W = LM + 24 * CELL + 20
+    H = TM + 7 * CELL + 25
+    max_val = max(max(row) for row in matrix) or 1
+
+    body = _title("Punch Card", W)
+
+    for h in range(0, 24, 3):
+        x = LM + h * CELL + CELL // 2
+        body += (
+            f"<text x='{x}' y='{TM-8}' fill='{C['sub']}' "
+            f"font-size='9' text-anchor='middle' {FF}>{h}</text>"
+        )
+
+    for d, day in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+        y = TM + d * CELL + CELL // 2
+        body += (
+            f"<text x='{LM-8}' y='{y+4}' fill='{C['sub']}' "
+            f"font-size='10' text-anchor='end' {FF}>{day}</text>"
+        )
+
+    for d in range(7):
+        for h in range(24):
+            cx = LM + h * CELL + CELL // 2
+            cy = TM + d * CELL + CELL // 2
+            val = matrix[d][h]
+            if val == 0:
+                body += f"<circle cx='{cx}' cy='{cy}' r='1.5' fill='{C['border']}'/>"
+            else:
+                ratio = val / max_val
+                r = 3 + ratio * 8
+                opacity = 0.4 + ratio * 0.6
+                clr = C["green"] if ratio > 0.7 else C["blue"] if ratio > 0.4 else C["cyan"]
+                body += (
+                    f"<circle cx='{cx}' cy='{cy}' r='{r:.1f}' "
+                    f"fill='{clr}' opacity='{opacity:.2f}'/>"
+                )
     return _wrap(W, H, body)
 
 
@@ -278,21 +455,17 @@ def gen_trophy(trophies):
         rc = RC.get(rank, C["sub"])
         cx = x + CW / 2
         body += (
-            # card bg
             f"<rect x='{x}' y='{PAD}' width='{CW}' height='{CH}' "
             f"rx='6' fill='{C['surface']}'/>"
             f"<rect x='{x}' y='{PAD}' width='{CW}' height='{CH}' "
             f"rx='6' fill='none' stroke='{C['border']}' stroke-width='0.5'/>"
-            # rank circle
             f"<circle cx='{cx}' cy='{PAD+30}' r='18' "
             f"fill='{rc}' opacity='0.15'/>"
             f"<circle cx='{cx}' cy='{PAD+30}' r='18' "
             f"fill='none' stroke='{rc}' stroke-width='1.5'/>"
-            # rank letter
             f"<text x='{cx}' y='{PAD+36}' fill='{rc}' "
             f"font-size='18' font-weight='bold' text-anchor='middle' {FF}>"
             f"{rank}</text>"
-            # label
             f"<text x='{cx}' y='{PAD+70}' fill='{C['sub']}' "
             f"font-size='9' text-anchor='middle' {FF}>{label}</text>"
         )
@@ -321,6 +494,18 @@ MOCK_LANGS = [
     {"name": "HTML",       "pct":  2.8},
 ]
 
+MOCK_PUNCH = [
+    [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 3, 5, 6, 7, 8, 6, 4, 3, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 5, 6, 4, 7, 8, 6, 5, 7, 5, 3, 2, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 4, 3, 5, 6, 5, 4, 6, 5, 3, 2, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 7, 6, 8, 9, 7, 6, 5, 4, 3, 2, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 4, 5, 4, 3, 4, 3, 2, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 3, 4, 3, 2, 3, 2, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 2, 1, 2, 1, 0, 0, 0, 0, 0, 0],
+]
+
+MOCK_STREAK = {"current": 42, "longest": 128, "total": 1_234}
+
 
 # ── Main ────────────────────────────────────────────────────────────────
 
@@ -331,14 +516,21 @@ def main():
     if mock:
         print("Running with mock data...")
         stats, langs = MOCK_STATS, MOCK_LANGS
+        punch, streak = MOCK_PUNCH, MOCK_STREAK
     else:
         stats, langs = gather()
+        print("Fetching events...")
+        punch = build_punch_card(fetch_events())
+        print("Fetching contribution calendar...")
+        streak = calc_streak(fetch_contribution_calendar())
 
     trophies = calc_trophies(stats)
 
     svgs = {
         "github-stats.svg": gen_stats(stats),
         "top-langs.svg":    gen_langs(langs),
+        "streak.svg":       gen_streak(streak),
+        "punch-card.svg":   gen_punch_card(punch),
         "trophy.svg":       gen_trophy(trophies),
     }
     for name, svg in svgs.items():
