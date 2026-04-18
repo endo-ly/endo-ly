@@ -39,10 +39,11 @@ API   = "https://api.github.com"
 TZ_OFFSET = 9  # JST (UTC+9)
 
 CARD_W, CARD_H = 470, 315
+CARD_W, CARD_H = 470, 315
 
 ACTIVITY_H = 260
-PUNCH_W = int(ACTIVITY_H * 3 * 0.75)
-STREAK_W = int(ACTIVITY_H * 1 * 0.75)
+PUNCH_W = 575
+STREAK_W = 230
 
 C = {
     "bg":      "#1a1b27",
@@ -619,8 +620,9 @@ def main():
     print("Done.")
 
 
-def _gen_preview(svgs):
+def _gen_preview(svgs, md=""): # mdが引き継がれる想定
     import base64
+    import os
 
     def b64(name):
         svg = svgs.get(name)
@@ -634,29 +636,35 @@ def _gen_preview(svgs):
     punch_src = b64("punch-card.svg")
     streak_src = b64("streak.svg")
 
-    md = "## 👋 About\n\n"
-    md += "- Based in **Tokyo, Japan**\n"
-    md += "- Born in **2000**\n"
-    md += "- Love **music** and **AI**\n\n"
-    md += "---\n\n"
     md += "### GitHub Stats\n\n"
-    md += '<div align="center">\n'
+    md += '<div align="center">\n  '
+    
+    stats_imgs = []
     if stats_src:
-        md += f'  <img width="49%" src="{stats_src}"/>\n'
+        stats_imgs.append(f'<img width="49%" align="top" src="{stats_src}"/>')
     if langs_src:
-        md += f'  <img width="49%" src="{langs_src}"/>\n'
-    md += "</div>\n\n"
+        stats_imgs.append(f'<img width="49%" align="top" src="{langs_src}"/>')
+    
+    md += "".join(stats_imgs)
+    md += "\n</div>\n\n"
+    
     md += "---\n\n"
+    
+    # --- Activity ---
     md += "### Activity\n\n"
-    md += '<div align="center">\n'
+    md += '<div align="center">\n  '
+    
+    activity_imgs = []
     if punch_src:
-        md += f'  <img width="74%" src="{punch_src}"/>\n'
+        activity_imgs.append(f'<img width="70%" align="top" src="{punch_src}"/>')
     if streak_src:
-        md += f'  <img width="24%" src="{streak_src}"/>\n'
-    md += "</div>\n"
+        activity_imgs.append(f'<img width="28%" align="top" src="{streak_src}"/>')
+        
+    md += "".join(activity_imgs)
+    md += "\n</div>\n"
 
     path = os.path.join(OUT, "preview.md")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(md)
     print(f"  ok  preview.md -> {path}")
 

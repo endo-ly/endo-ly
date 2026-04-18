@@ -18,6 +18,5 @@
 ### Activity
 
 <div align="center">
-  <img width="74%" src="https://raw.githubusercontent.com/endo-ly/endo-ly/output/punch-card.svg" alt="Punch Card"/>
-  <img width="24%" src="https://raw.githubusercontent.com/endo-ly/endo-ly/output/streak.svg" alt="Streak"/>
+  <img width="70%" align="top" src="https://raw.githubusercontent.com/endo-ly/endo-ly/output/punch-card.svg" alt="Punch Card"/><img width="28%" align="top" src="https://raw.githubusercontent.com/endo-ly/endo-ly/output/streak.svg" alt="Streak"/>
 </div>
